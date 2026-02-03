@@ -5,6 +5,7 @@ Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 """
 
 from sqlalchemy import Column, Integer, Float, String
+from sqlalchemy.orm import relationship
 from orders.models.base import Base
 
 class Product(Base):
@@ -14,3 +15,5 @@ class Product(Base):
     name = Column(String, nullable=False)
     sku = Column(String, nullable=False)
     price = Column(Float, nullable=False)
+    
+    stocks = relationship("Stock", back_populates="product")
