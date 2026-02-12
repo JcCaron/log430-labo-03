@@ -80,7 +80,29 @@ def update_stock_redis(order_items, operation):
             else:
                 product_id = item['product_id']
                 quantity = item['quantity']
-            # TODO: ajoutez plus d'information sur l'article
+            
+            session = get_sqlalchemy_session()
+            try:
+                product_data = session.execute(
+                        text("""
+                            SELECT p.name, p.sku, p.price
+                            FROM stocks s
+                            INNER JOIN products p ON s.product_id = p.id
+                            WHERE s.product_id = :pid
+                        """),
+                        {"pid": product_id}
+                    ).fetchone()
+                
+                if product_data:
+                    name, sku, price = product_data
+                else:
+                    name, sku, price = "Unknown", "N/A", 0.0
+            except Exception as e:
+                print(f"Erreur de synchronisation: {e}")
+                raise e
+            finally:
+                session.close()
+                
             current_stock = r.hget(f"stock:{product_id}", "quantity")
             current_stock = int(current_stock) if current_stock else 0
             
@@ -89,7 +111,12 @@ def update_stock_redis(order_items, operation):
             else:  
                 new_quantity = current_stock - quantity
             
-            pipeline.hset(f"stock:{product_id}", "quantity", new_quantity)
+            pipeline.hset(f"stock:{product_id}", mapping={
+                "quantity": int(new_quantity),
+                "sku": str(sku),
+                "price": float(price),
+                "name": str(name)
+            })
         
         pipeline.execute()
     
@@ -101,7 +128,11 @@ def _populate_redis_from_mysql(redis_conn):
     session = get_sqlalchemy_session()
     try:
         stocks = session.execute(
-            text("SELECT product_id, quantity FROM stocks")
+            text("""
+                SELECT s.product_id, s.quantity, p.name, p.sku, p.price
+                FROM stocks s
+                INNER JOIN products p ON s.product_id = p.id
+            """)
         ).fetchall()
 
         if not len(stocks):
@@ -110,10 +141,15 @@ def _populate_redis_from_mysql(redis_conn):
         
         pipeline = redis_conn.pipeline()
         
-        for product_id, quantity in stocks:
+        for product_id, quantity, name, sku, price in stocks:
             pipeline.hset(
                 f"stock:{product_id}", 
-                mapping={ "quantity": quantity }
+                mapping={ 
+                    "quantity": quantity,
+                    "name": name,
+                    "sku": sku,
+                    "price": price
+                }
             )
         
         pipeline.execute()
